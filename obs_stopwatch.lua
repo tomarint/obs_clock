@@ -1,23 +1,41 @@
 -- OBS Lua Script
 -- This script displays a stopwatch on a specified text source in OBS.
--- The stopwatch starts from 00:00:00.00 and increments every second when started.
+-- The stopwatch starts from 00:00:00.00 and increments every centisecond when started.
 
 local ffi = require("ffi")
 
-ffi.cdef[[
-    typedef long time_t;
-    typedef struct timeval {
-        time_t tv_sec;
-        time_t tv_usec;
-    } timeval;
+if ffi.os == "Windows" then
+    ffi.cdef[[
+        typedef struct {
+            unsigned long dwLowDateTime;
+            unsigned long dwHighDateTime;
+        } FILETIME;
 
-    int gettimeofday(struct timeval* tv, struct timezone* tz);
-]]
+        void GetSystemTimeAsFileTime(FILETIME* lpSystemTimeAsFileTime);
+    ]]
 
-local function get_time_in_ms()
-    local tv = ffi.new("timeval")
-    ffi.C.gettimeofday(tv, nil)
-    return tonumber(tv.tv_sec) * 1000 + tonumber(tv.tv_usec) / 1000
+    function get_time_in_ms()
+        local ft = ffi.new("FILETIME")
+        ffi.C.GetSystemTimeAsFileTime(ft)
+        local t = ft.dwHighDateTime * 2^32 + ft.dwLowDateTime
+        return t / 10000
+    end
+else
+    ffi.cdef[[
+        typedef long time_t;
+        typedef struct timeval {
+            time_t tv_sec;
+            time_t tv_usec;
+        } timeval;
+
+        int gettimeofday(struct timeval* tv, struct timezone* tz);
+    ]]
+
+    function get_time_in_ms()
+        local tv = ffi.new("timeval")
+        ffi.C.gettimeofday(tv, nil)
+        return tonumber(tv.tv_sec) * 1000 + tonumber(tv.tv_usec) / 1000
+    end
 end
 
 obs = obslua
@@ -47,14 +65,15 @@ end
 -- Function to calculate and update the elapsed time on the text source
 function update_text()
     script_log(LOG_DEBUG, "Updating text...")
+    local current_time = elapsed_time
     if stopwatch_running then
-        elapsed_time = get_time_in_ms() - start_time
+        current_time = current_time + (get_time_in_ms() - start_time)
     end
 
-    local hours = math.floor(elapsed_time / 3600000)
-    local minutes = math.floor((elapsed_time % 3600000) / 60000)
-    local seconds = math.floor((elapsed_time % 60000) / 1000)
-    local centiseconds = math.floor((elapsed_time % 1000) / 10)
+    local hours = math.floor(current_time / 3600000)
+    local minutes = math.floor((current_time % 3600000) / 60000)
+    local seconds = math.floor((current_time % 60000) / 1000)
+    local centiseconds = math.floor((current_time % 1000) / 10)
     local text = string.format("%02d:%02d:%02d.%02d", hours, minutes, seconds, centiseconds)
     script_log(LOG_INFO, "Elapsed time: " .. text)
     
@@ -78,6 +97,7 @@ function toggle_stopwatch(pressed)
     if pressed then
         if stopwatch_running then
             -- Stop the stopwatch
+            elapsed_time = elapsed_time + (get_time_in_ms() - start_time)
             stopwatch_running = false
             obs.timer_remove(timer_callback)
             script_log(LOG_INFO, "Stopwatch stopped")
@@ -133,6 +153,6 @@ end
 -- Function to return script description
 function script_description()
     return "This script displays a stopwatch on a specified text source in OBS.\n" ..
-           "The stopwatch starts from 00:00:00.00 and increments every second when started.\n" ..
+           "The stopwatch starts from 00:00:00.00 and increments every centisecond when started.\n" ..
            "Use the Start/Stop/Reset button to control the stopwatch."
 end
